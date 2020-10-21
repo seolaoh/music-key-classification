@@ -35,7 +35,7 @@ def signal_process(audio_samples, sr=22050, method='spectrogram'):
         return mel_layer(audio_samples)
     
     elif method == 'logmelspectrogram':
-        mel_layer = torchaudio.transforms.MelSpectrogram(sample_rate=22050, n_fft=2048, hop_length=1024, normalized=True)
+        mel_layer = torchaudio.transforms.MelSpectrogram(sample_rate=44100, n_fft=2048, hop_length=1024, normalized=True)
         mel_spec = mel_layer(audio_samples)
         log_mel = torch.log(torch.clamp(mel_spec, min=1e-6))
         return log_mel

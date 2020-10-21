@@ -33,9 +33,9 @@ class KeyDataset(Dataset):
         track_id = self.metadata_df.iloc[idx][self.track_column_name]
         label = self.label_dict[self.metadata_df.iloc[idx][self.label_column_name]]
         audio, sr = librosa.load(os.path.join(self.audio_dir, (f"{track_id}.wav")), mono=True, sr=self.sr)                                
-        audio_len = len(audio)
-        start_point = random.randint(0, audio_len/3)
-        audio = audio[start_point : math.floor(start_point + audio_len*2/3)]
+        # audio_len = len(audio)
+        # start_point = random.randint(0, audio_len/3)
+        # audio = audio[start_point : math.floor(start_point + audio_len*2/3)]
         return audio, label
 
 

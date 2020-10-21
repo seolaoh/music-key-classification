@@ -5,21 +5,20 @@ from dataloader import KeyDataset
 from torch.utils.data import DataLoader
 from signal_process import signal_process
 from time import time
-# from torchsummary import summary
 from torch.utils.tensorboard import SummaryWriter
-
+from torch import optim
 
 
 # TODO : IMPORTANT !!! Please change it to True when you submit your code
 is_test_mode = False
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 # TODO : IMPORTANT !!! Please specify the path where your best model is saved
 # example : ckpt/model.pth
 ckpt_dir = 'ckpt'
-best_saved_model = 'last.pth'
+best_saved_model = 'top_accuracy.pth'
 if not os.path.exists(ckpt_dir):
     os.mkdir(ckpt_dir)
 restore_path = os.path.join(ckpt_dir, best_saved_model)
@@ -32,7 +31,7 @@ audio_dir = 'audio'
 # TODO : Declare additional hyperparameters
 # not fixed (change or add hyperparameter as you like)
 is_continue_mode = False
-n_epochs = 100
+n_epochs = 200
 batch_size = 16
 num_label = 24
 method = 'logmelspectrogram'
@@ -52,64 +51,69 @@ class YourModel(nn.Module):
     def __init__(self):
         super(YourModel, self).__init__()
 
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(1, 20, 5),
-            nn.BatchNorm2d(20),
-            nn.ELU(True),
-            nn.Conv2d(20, 20, 3),
-            nn.BatchNorm2d(20),
-            nn.ELU(True),
-            nn.MaxPool2d(2),
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(1, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            nn.Conv2d(64, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            nn.Dropout(0.75)
+        )
+
+        self.layer2 = nn.Sequential(
+            nn.Conv2d(64, 128, 3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            nn.Conv2d(128, 128, 3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
             nn.Dropout(0.5)
         )
 
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(20, 40, 3),
-            nn.BatchNorm2d(40),
-            nn.ELU(True),
-            nn.Conv2d(40, 40, 3),
-            nn.BatchNorm2d(40),
-            nn.ELU(True),
-            nn.MaxPool2d(2),
+        self.layer3 = nn.Sequential(
+            nn.Conv2d(128, 256, 3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(True),
+            nn.Conv2d(256, 256, 3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(True),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
             nn.Dropout(0.5)
         )
 
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(40, 80, 3),
-            nn.BatchNorm2d(80),
-            nn.ELU(True),
-            nn.Conv2d(80, 80, 3),
-            nn.BatchNorm2d(80),
-            nn.ELU(True),
-            nn.MaxPool2d(2),
-            nn.Dropout(0.5)
-        )
-
-        self.conv4 = nn.Sequential(
-            nn.Conv2d(80, 160, 3),
-            nn.BatchNorm2d(160),
-            nn.ELU(True),
+        self.layer4 = nn.Sequential(
+            nn.Conv2d(256, 512, 3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(True),
             nn.Dropout(0.5),
-            nn.Conv2d(160, 160, 3),
-            nn.BatchNorm2d(160),
-            nn.ELU(True),
+            nn.Conv2d(512, 512, 3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(True),
             nn.Dropout(0.5),
-            nn.Conv2d(160, 24, 1),
+            nn.Conv2d(512, 24, 1),
             nn.BatchNorm2d(24),
-            nn.ELU(True)
+            nn.ReLU(True)
         )
 
         self.avgpool = GlobalAvgPooling()
-        # self.fc = nn.Linear(24, 24, bias=True)
+
+        #for m in self.modules():
+        #    if isinstance(m, nn.Conv2d):
+        #        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity="leaky_relu")
+        #    elif isinstance(m, nn.BatchNorm2d):
+        #        nn.init.constant_(m.weight, 1)
+        #        nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         x = x.unsqueeze(1)
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.conv3(x)
-        x = self.conv4(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
         x = self.avgpool(x)
-        # x = self.fc(x)
 
         return x
 
@@ -132,16 +136,26 @@ if not is_test_mode:
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     valid_dataset = KeyDataset(metadata_path=metadata_path, audio_dir=audio_dir, sr=sr, split='validation')
-    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
 
     # Define Model, loss, optimizer
     model = YourModel()
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-1)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
 
-    # # Summary model by summarywriter
-    # input_shape = (batch_size, )
+    scheduler_list = [
+        optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=0.1, patience=15, min_lr=1e-4),
+        optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: 1 / (epoch + 1)),
+        optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=5, gamma=0.5),
+        optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[2, 5, 10, 11, 28], gamma=0.5),
+        optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=0.96),
+        optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=10, eta_min=0)
+    ]
+    scheduler = scheduler_list[0]
+    scheduler_name = scheduler.__class__.__name__
+    print(scheduler_name)
 
     if is_continue_mode:
         checkpoint = torch.load(restore_path)
@@ -157,6 +171,9 @@ if not is_test_mode:
 
         train_correct = 0
         train_loss = 0
+
+        lr = optimizer.param_groups[0]['lr']
+        print('==== Epoch:', epoch, ', LR:', lr)
 
         for idx, (features, labels) in enumerate(train_loader):
 
@@ -176,8 +193,8 @@ if not is_test_mode:
             preds = output.argmax(dim=-1, keepdim=True)
             train_correct += (preds.squeeze() == labels).float().sum()
 
-        print("==== Epoch: %d, Train Loss: %.2f, Train Accuracy: %.3f" % (
-            epoch, train_loss / len(train_loader), train_correct / len(train_dataset)))
+        print("Train Loss: %.2f, Train Accuracy: %.3f" % (
+            train_loss / len(train_loader), train_correct / len(train_dataset)))
 
         model.eval()
 
@@ -195,14 +212,18 @@ if not is_test_mode:
             preds = output.argmax(dim=-1, keepdim=True)
             valid_correct += (preds.squeeze() == labels).float().sum()
 
-        print("==== Epoch: %d, Valid Loss: %.2f, Valid Accuracy: %.3f" % (
-            epoch, valid_loss / len(valid_loader), valid_correct / len(valid_dataset)))
+        print("Valid Loss: %.2f, Valid Accuracy: %.3f" % (
+            valid_loss / len(valid_loader), valid_correct / len(valid_dataset)))
 
         # Write to tensorboard
         writer.add_scalars('loss/training+validation', {"loss_training": train_loss / len(train_loader),
                                                         "loss_validation": valid_loss / len(valid_loader)}, epoch)
         writer.add_scalars('accuracy/training+validation', {"accuracy_training": train_correct / len(train_dataset),
                                                             "accuracy_validation": valid_correct / len(valid_dataset)}, epoch)
+        lr = optimizer.param_groups[0]['lr']
+        writer.add_scalar('lr/{}'.format(scheduler_name), lr, epoch)
+
+        scheduler.step(metrics = valid_loss)
 
         save_checkpoint(epoch, model, optimizer, "./ckpt/last.pth")
         # torch.save(model, "./ckpt/last.pth")
