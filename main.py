@@ -12,8 +12,8 @@ from torch import optim
 # TODO : IMPORTANT !!! Please change it to True when you submit your code
 is_test_mode = False
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # TODO : IMPORTANT !!! Please specify the path where your best model is saved
 # example : ckpt/model.pth
@@ -100,9 +100,9 @@ class YourModel(nn.Module):
 
         self.avgpool = GlobalAvgPooling()
 
-        #for m in self.modules():
+        # for m in self.modules():
         #    if isinstance(m, nn.Conv2d):
-        #        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity="leaky_relu")
+        #        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity="relu")
         #    elif isinstance(m, nn.BatchNorm2d):
         #        nn.init.constant_(m.weight, 1)
         #        nn.init.constant_(m.bias, 0)
@@ -142,11 +142,11 @@ if not is_test_mode:
     model = YourModel()
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-1)
-    # optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=1e-1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
 
     scheduler_list = [
-        optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=0.1, patience=15, min_lr=1e-4),
+        optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=0.1, patience=10, min_lr=1e-4),
         optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: 1 / (epoch + 1)),
         optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=5, gamma=0.5),
         optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[2, 5, 10, 11, 28], gamma=0.5),
