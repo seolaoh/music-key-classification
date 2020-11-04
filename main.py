@@ -7,12 +7,14 @@ from signal_process import signal_process
 from time import time
 from torch.utils.tensorboard import SummaryWriter
 from torch import optim
+# from torchsummary import summary
+import numpy as np
+import random
 
 
 # TODO : IMPORTANT !!! Please change it to True when you submit your code
-is_test_mode = False
+is_test_mode = True
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # TODO : IMPORTANT !!! Please specify the path where your best model is saved
@@ -30,14 +32,28 @@ audio_dir = 'audio'
 
 # TODO : Declare additional hyperparameters
 # not fixed (change or add hyperparameter as you like)
-is_continue_mode = False
-n_epochs = 200
+n_epochs = 100
 batch_size = 16
 num_label = 24
 method = 'logmelspectrogram'
 sr = 22050
 
+# continue training previously saved model
+is_continue_mode = False
 
+# reproduce result
+seed = 929
+np.random.seed(seed)
+random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
+
+
+# Global Average Pooling
 class GlobalAvgPooling(nn.Module):
     def __init__(self):
         super(GlobalAvgPooling, self).__init__()
@@ -100,12 +116,13 @@ class YourModel(nn.Module):
 
         self.avgpool = GlobalAvgPooling()
 
-        # for m in self.modules():
-        #    if isinstance(m, nn.Conv2d):
-        #        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity="relu")
-        #    elif isinstance(m, nn.BatchNorm2d):
-        #        nn.init.constant_(m.weight, 1)
-        #        nn.init.constant_(m.bias, 0)
+        # He initialization for Convolutional layers & constant initialization for Batch normalization
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity="relu")
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         x = x.unsqueeze(1)
@@ -118,6 +135,7 @@ class YourModel(nn.Module):
         return x
 
 
+# Save model with state_dict
 def save_checkpoint(epoch, model, optimizer, path):
     state = {
         'epoch': epoch,
@@ -129,6 +147,7 @@ def save_checkpoint(epoch, model, optimizer, path):
 
 if not is_test_mode:
 
+    # Write the result to tensorboard
     writer = SummaryWriter('./tensorboard')
 
     # Load Dataset and Dataloader
@@ -136,15 +155,15 @@ if not is_test_mode:
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     valid_dataset = KeyDataset(metadata_path=metadata_path, audio_dir=audio_dir, sr=sr, split='validation')
-    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True)
 
     # Define Model, loss, optimizer
     model = YourModel()
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
-    # optimizer = torch.optim.Adam(model.parameters(), lr=1e-1)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
 
+    # Learning rate scheduler: ReduceLROnPlateau
     scheduler_list = [
         optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=0.1, patience=10, min_lr=1e-4),
         optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: 1 / (epoch + 1)),
@@ -155,13 +174,13 @@ if not is_test_mode:
     ]
     scheduler = scheduler_list[0]
     scheduler_name = scheduler.__class__.__name__
-    print(scheduler_name)
 
     if is_continue_mode:
         checkpoint = torch.load(restore_path)
         model.load_state_dict(checkpoint['net_state_dict'])
         optimizer.load_state_dict(checkpoint['optim_state_dict'])
 
+    # to compare the result of current epoch with previous best accuracy
     top_accuracy = 0
 
     # Training and Validation
@@ -172,16 +191,19 @@ if not is_test_mode:
         train_correct = 0
         train_loss = 0
 
+        # print learning rate of current epoch
         lr = optimizer.param_groups[0]['lr']
         print('==== Epoch:', epoch, ', LR:', lr)
 
         for idx, (features, labels) in enumerate(train_loader):
 
             optimizer.zero_grad()
-            # print(features.shape)
             features = signal_process(features, sr=sr, method=method).to(device)
-            # print(features.shape)
             labels = labels.to(device)
+
+            # # Summary model with summarywriter
+            # input_shape = features.shape[1:]
+            # summary(model, input_shape)
 
             output = model(features)
             loss = criterion(output, labels)
@@ -220,21 +242,23 @@ if not is_test_mode:
                                                         "loss_validation": valid_loss / len(valid_loader)}, epoch)
         writer.add_scalars('accuracy/training+validation', {"accuracy_training": train_correct / len(train_dataset),
                                                             "accuracy_validation": valid_correct / len(valid_dataset)}, epoch)
-        lr = optimizer.param_groups[0]['lr']
         writer.add_scalar('lr/{}'.format(scheduler_name), lr, epoch)
 
-        scheduler.step(metrics = valid_loss)
+        # learning rate scheduler
+        scheduler.step(metrics=valid_loss)
 
-        save_checkpoint(epoch, model, optimizer, "./ckpt/last.pth")
-        # torch.save(model, "./ckpt/last.pth")
+        train_accuracy = train_correct / len(train_dataset)
         valid_accuracy = valid_correct / len(valid_dataset)
+        # Save the model of current epoch with train_accuracy and valid_accuracy
+        torch.save(model, "./ckpt/%d_%.4f_%.4f.pth" % (epoch, train_accuracy, valid_accuracy))
+        # Save the model which results the best accuracy
         if valid_accuracy > top_accuracy:
-            save_checkpoint(epoch, model, optimizer, "./ckpt/top_accuracy.pth")
-            # torch.save(model, './ckpt/top_accuracy.pth')
+            torch.save(model, './ckpt/top_accuracy.pth')
             top_accuracy = valid_accuracy
         print('TIME: %6.3f' % (time() - epoch_start))
 
     writer.close()
+
 
 elif is_test_mode:
 
